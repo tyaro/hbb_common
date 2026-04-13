@@ -108,7 +108,7 @@ lazy_static::lazy_static! {
     static ref ONLINE: Mutex<HashMap<String, i64>> = Default::default();
     pub static ref PROD_RENDEZVOUS_SERVER: RwLock<String> = RwLock::new("".to_owned());
     pub static ref EXE_RENDEZVOUS_SERVER: RwLock<String> = Default::default();
-    pub static ref APP_NAME: RwLock<String> = RwLock::new("RustDesk".to_owned());
+    pub static ref APP_NAME: RwLock<String> = RwLock::new("RustDesk-lan".to_owned());
     static ref KEY_PAIR: Mutex<Option<KeyPair>> = Default::default();
     static ref USER_DEFAULT_CONFIG: RwLock<(UserDefaultConfig, Instant)> = RwLock::new((UserDefaultConfig::load(), Instant::now()));
     pub static ref NEW_STORED_PEER_CONFIG: Mutex<HashSet<String>> = Default::default();
@@ -597,6 +597,31 @@ impl Config {
         suffix: &str,
     ) -> T {
         let file = Self::file_(suffix);
+        if !file.exists() {
+            if let Some(legacy_file) = Self::legacy_file_(suffix) {
+                if legacy_file.exists() {
+                    let cfg = load_path(legacy_file.clone());
+                    if let Err(err) = store_path(file.clone(), &cfg) {
+                        log::warn!(
+                            "Failed to migrate config from '{}' to '{}': {}",
+                            legacy_file.display(),
+                            file.display(),
+                            err
+                        );
+                    } else {
+                        log::info!(
+                            "Migrated config from '{}' to '{}'",
+                            legacy_file.display(),
+                            file.display()
+                        );
+                    }
+                    if suffix.is_empty() {
+                        log::trace!("{:?}", cfg);
+                    }
+                    return cfg;
+                }
+            }
+        }
         let cfg = load_path(file);
         if suffix.is_empty() {
             log::trace!("{:?}", cfg);
@@ -703,6 +728,42 @@ impl Config {
     fn file_(suffix: &str) -> PathBuf {
         let name = format!("{}{}", *APP_NAME.read().unwrap(), suffix);
         Config::with_extension(Self::path(name))
+    }
+
+    fn legacy_file_(suffix: &str) -> Option<PathBuf> {
+        const LEGACY_APP_NAME: &str = "RustDesk";
+        let app_name = APP_NAME.read().unwrap().clone();
+        if app_name == LEGACY_APP_NAME {
+            return None;
+        }
+        Some(Self::file_for_app_(LEGACY_APP_NAME, suffix))
+    }
+
+    fn file_for_app_(app_name: &str, suffix: &str) -> PathBuf {
+        let name = format!("{}{}", app_name, suffix);
+        Self::with_extension(Self::path_for_app(app_name, name))
+    }
+
+    fn path_for_app<P: AsRef<Path>>(app_name: &str, p: P) -> PathBuf {
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        {
+            let mut path: PathBuf = APP_DIR.read().unwrap().clone().into();
+            path.push(p);
+            return path;
+        }
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        {
+            #[cfg(not(target_os = "macos"))]
+            let org = "".to_owned();
+            #[cfg(target_os = "macos")]
+            let org = ORG.read().unwrap().clone();
+            if let Some(project) = directories_next::ProjectDirs::from("", &org, app_name) {
+                let mut path = patch(project.config_dir().to_path_buf());
+                path.push(p);
+                return path;
+            }
+            "".into()
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -2204,13 +2265,7 @@ pub struct LanPeers {
 impl LanPeers {
     pub fn load() -> LanPeers {
         let _lock = CONFIG.read().unwrap();
-        match confy::load_path(Config::file_("_lan_peers")) {
-            Ok(peers) => peers,
-            Err(err) => {
-                log::error!("Failed to load lan peers: {}", err);
-                Default::default()
-            }
-        }
+        Config::load_::<LanPeers>("_lan_peers")
     }
 
     pub fn store(peers: &[DiscoveryPeer]) {
