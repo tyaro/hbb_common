@@ -52,6 +52,9 @@ fn verification_method() -> VerificationMethod {
 
 pub fn temporary_password_length() -> usize {
     let length = Config::get_option("temporary-password-length");
+    if length == "4" {
+        4
+    } else 
     if length == "8" {
         8
     } else if length == "10" {
