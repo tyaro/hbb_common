@@ -255,7 +255,7 @@ where
 }
 
 pub fn is_valid_custom_id(id: &str) -> bool {
-    regex::Regex::new(r"^[a-zA-Z][\w-]{5,15}$")
+    regex::Regex::new(r"^[a-zA-Z][\w-]{3,15}$")
         .unwrap()
         .is_match(id)
 }
@@ -621,6 +621,17 @@ mod test {
         assert_eq!(AddrMangle::decode(&AddrMangle::encode(addr_v6)), addr_v6);
         let addr_v6 = "[::1]:8080".parse().unwrap();
         assert_eq!(AddrMangle::decode(&AddrMangle::encode(addr_v6)), addr_v6);
+    }
+
+    #[test]
+    fn test_is_valid_custom_id() {
+        assert!(is_valid_custom_id("abcd"));
+        assert!(is_valid_custom_id("a_1-"));
+        assert!(is_valid_custom_id("a123456789012345"));
+        assert!(!is_valid_custom_id("abc"));
+        assert!(!is_valid_custom_id("1abc"));
+        assert!(!is_valid_custom_id("ab c"));
+        assert!(!is_valid_custom_id("abcdefghijklmnopq"));
     }
 
     #[test]
